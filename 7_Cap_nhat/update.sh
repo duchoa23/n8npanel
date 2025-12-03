@@ -499,25 +499,53 @@ update_n8n() {
 }
 
 manage_network_stack() {
+    # Chọn instance nếu có nhiều instance
+    local instance_id="1"
+    local nginx_config="/etc/nginx/sites-available/n8n"
+    local data_dir="/root/n8n_data"
+    local container_name="n8n"
+    local domain=""
+    
+    if type select_instance_for_operation &>/dev/null; then
+        if ! select_instance_for_operation "Chọn instance để cấu hình mạng"; then
+            return 0
+        fi
+        instance_id="${SELECTED_INSTANCE:-1}"
+        data_dir="${SELECTED_DATA_DIR:-/root/n8n_data}"
+        container_name="${SELECTED_CONTAINER:-n8n}"
+        domain="${SELECTED_DOMAIN:-}"
+        
+        if [ "$instance_id" = "1" ]; then
+            nginx_config="/etc/nginx/sites-available/n8n"
+        else
+            nginx_config="/etc/nginx/sites-available/n8n_${instance_id}"
+        fi
+    fi
+    
     while true; do
         clear
         print_banner
         
         echo -e "${BOLD}${CYAN}🌐 QUẢN LÝ CẤU HÌNH MẠNG${NC}"
         echo -e "${CYAN}═══════════════════════════════════════${NC}"
+        echo -e "${YELLOW}📌 Instance: ${instance_id} | Domain: ${domain:-N/A}${NC}"
         echo ""
         
         local ipv4=$(get_server_ipv4)
         local ipv6=$(get_server_ipv6)
-        local nginx_ipv4=$(grep -q "listen 80;" /etc/nginx/sites-available/n8n 2>/dev/null && echo "✅" || echo "❌")
-        local nginx_ipv6=$(grep -q "listen \[::\]:" /etc/nginx/sites-available/n8n 2>/dev/null && echo "✅" || echo "❌")
+        local nginx_ipv4=$(grep -q "listen 80;" "$nginx_config" 2>/dev/null && echo "✅" || echo "❌")
+        local nginx_ipv6=$(grep -q "listen \[::\]:80;" "$nginx_config" 2>/dev/null && echo "✅" || echo "❌")
+        local nginx_ssl_ipv4=$(grep -q "listen 443 ssl" "$nginx_config" 2>/dev/null && echo "✅" || echo "❌")
+        local nginx_ssl_ipv6=$(grep -q "listen \[::\]:443 ssl" "$nginx_config" 2>/dev/null && echo "✅" || echo "❌")
         local docker_ipv6=$(grep -q '"ipv6".*true' /etc/docker/daemon.json 2>/dev/null && echo "✅" || echo "❌")
         
         echo -e "${YELLOW}📊 Trạng thái hiện tại:${NC}"
         echo -e "${CYAN}   • Server IPv4: ${ipv4:-"❌ Không có"}${NC}"
         echo -e "${CYAN}   • Server IPv6: ${ipv6:-"❌ Không có"}${NC}"
-        echo -e "${CYAN}   • Nginx IPv4: $nginx_ipv4 | IPv6: $nginx_ipv6${NC}"
+        echo -e "${CYAN}   • Nginx HTTP  - IPv4: $nginx_ipv4 | IPv6: $nginx_ipv6${NC}"
+        echo -e "${CYAN}   • Nginx HTTPS - IPv4: $nginx_ssl_ipv4 | IPv6: $nginx_ssl_ipv6${NC}"
         echo -e "${CYAN}   • Docker IPv6: $docker_ipv6${NC}"
+        echo -e "${CYAN}   • Config file: $nginx_config${NC}"
         echo ""
         
         echo -e "${BOLD}${GREEN}CHỌN CHẾ ĐỘ MẠNG:${NC}"
@@ -538,16 +566,13 @@ manage_network_stack() {
         
         case $network_choice in
             1) 
-                echo -e "\n${BOLD}${GREEN}🌐 CẤU HÌNH CHẾ ĐỘ IPv4 ONLY...${NC}\n"
-                echo -e "${YELLOW}Tính năng đang được phát triển...${NC}"
+                configure_ipv4_only "$nginx_config" "$instance_id"
                 ;;
             2) 
-                echo -e "\n${BOLD}${PURPLE}🌐 CẤU HÌNH CHẾ ĐỘ IPv6 ONLY...${NC}\n"
-                echo -e "${YELLOW}Tính năng đang được phát triển...${NC}"
+                configure_ipv6_only "$nginx_config" "$instance_id" "$ipv6"
                 ;;
             3) 
-                echo -e "\n${BOLD}${YELLOW}🌐 CẤU HÌNH CHẾ ĐỘ DUAL-STACK...${NC}\n"
-                echo -e "${YELLOW}Tính năng đang được phát triển...${NC}"
+                configure_dual_stack "$nginx_config" "$instance_id" "$ipv6"
                 ;;
             0) 
                 break 
@@ -565,6 +590,248 @@ manage_network_stack() {
             read -p "$(echo -e "${BOLD}${YELLOW}⏸️  Nhấn Enter để tiếp tục...${NC}")"
         fi
     done
+}
+
+# Cấu hình chế độ IPv4 only
+configure_ipv4_only() {
+    local nginx_config="$1"
+    local instance_id="$2"
+    
+    echo -e "\n${BOLD}${GREEN}🌐 CẤU HÌNH CHẾ ĐỘ IPv4 ONLY...${NC}\n"
+    
+    if [ ! -f "$nginx_config" ]; then
+        echo -e "${RED}❌ Không tìm thấy file cấu hình Nginx: $nginx_config${NC}"
+        return 1
+    fi
+    
+    # Backup config
+    local backup_file="${nginx_config}.backup.$(date +%Y%m%d_%H%M%S)"
+    cp "$nginx_config" "$backup_file"
+    echo -e "${CYAN}📦 Đã backup config: $backup_file${NC}"
+    
+    # Xóa các dòng listen IPv6
+    sed -i '/listen \[::\]:80;/d' "$nginx_config"
+    sed -i '/listen \[::\]:443 ssl;/d' "$nginx_config"
+    sed -i '/listen \[::\]:443 ssl http2;/d' "$nginx_config"
+    
+    # Đảm bảo có listen IPv4
+    if ! grep -q "listen 80;" "$nginx_config"; then
+        sed -i '/server {/a\    listen 80;' "$nginx_config"
+    fi
+    
+    echo -e "${GREEN}✅ Đã xóa cấu hình IPv6 khỏi Nginx${NC}"
+    
+    # Test và reload Nginx
+    if nginx -t 2>/dev/null; then
+        systemctl reload nginx
+        echo -e "${GREEN}✅ Đã reload Nginx thành công${NC}"
+        echo -e "\n${GREEN}🎉 Instance $instance_id đã chuyển sang chế độ IPv4 only${NC}"
+        log_message "SUCCESS" "Instance $instance_id: Chuyển sang IPv4 only"
+    else
+        echo -e "${RED}❌ Lỗi cấu hình Nginx, đang rollback...${NC}"
+        cp "$backup_file" "$nginx_config"
+        nginx -t && systemctl reload nginx
+        echo -e "${YELLOW}⚠️  Đã rollback về cấu hình cũ${NC}"
+        return 1
+    fi
+}
+
+# Cấu hình chế độ IPv6 only
+configure_ipv6_only() {
+    local nginx_config="$1"
+    local instance_id="$2"
+    local ipv6="$3"
+    
+    echo -e "\n${BOLD}${PURPLE}🌐 CẤU HÌNH CHẾ ĐỘ IPv6 ONLY...${NC}\n"
+    
+    # Kiểm tra server có IPv6 không
+    if [ -z "$ipv6" ]; then
+        echo -e "${RED}❌ Server không có địa chỉ IPv6!${NC}"
+        echo -e "${YELLOW}💡 Vui lòng cấu hình IPv6 cho server trước${NC}"
+        return 1
+    fi
+    
+    if [ ! -f "$nginx_config" ]; then
+        echo -e "${RED}❌ Không tìm thấy file cấu hình Nginx: $nginx_config${NC}"
+        return 1
+    fi
+    
+    # Backup config
+    local backup_file="${nginx_config}.backup.$(date +%Y%m%d_%H%M%S)"
+    cp "$nginx_config" "$backup_file"
+    echo -e "${CYAN}📦 Đã backup config: $backup_file${NC}"
+    
+    # Xóa các dòng listen IPv4
+    sed -i '/listen 80;/d' "$nginx_config"
+    sed -i '/listen 443 ssl;/d' "$nginx_config"
+    sed -i '/listen 443 ssl http2;/d' "$nginx_config"
+    
+    # Thêm listen IPv6 nếu chưa có
+    if ! grep -q "listen \[::\]:80;" "$nginx_config"; then
+        sed -i '/server {/a\    listen [::]:80;' "$nginx_config"
+    fi
+    
+    echo -e "${GREEN}✅ Đã cấu hình Nginx chỉ sử dụng IPv6${NC}"
+    
+    # Cấu hình Docker IPv6 (global)
+    configure_docker_ipv6
+    
+    # Test và reload Nginx
+    if nginx -t 2>/dev/null; then
+        systemctl reload nginx
+        echo -e "${GREEN}✅ Đã reload Nginx thành công${NC}"
+        echo -e "\n${GREEN}🎉 Instance $instance_id đã chuyển sang chế độ IPv6 only${NC}"
+        echo -e "${YELLOW}⚠️  Lưu ý: Chỉ có thể truy cập qua IPv6${NC}"
+        log_message "SUCCESS" "Instance $instance_id: Chuyển sang IPv6 only"
+    else
+        echo -e "${RED}❌ Lỗi cấu hình Nginx, đang rollback...${NC}"
+        cp "$backup_file" "$nginx_config"
+        nginx -t && systemctl reload nginx
+        echo -e "${YELLOW}⚠️  Đã rollback về cấu hình cũ${NC}"
+        return 1
+    fi
+}
+
+# Cấu hình chế độ Dual-stack (IPv4 + IPv6)
+configure_dual_stack() {
+    local nginx_config="$1"
+    local instance_id="$2"
+    local ipv6="$3"
+    
+    echo -e "\n${BOLD}${YELLOW}🌐 CẤU HÌNH CHẾ ĐỘ DUAL-STACK...${NC}\n"
+    
+    # Kiểm tra server có IPv6 không
+    if [ -z "$ipv6" ]; then
+        echo -e "${YELLOW}⚠️  Server không có địa chỉ IPv6${NC}"
+        echo -e "${YELLOW}💡 Dual-stack sẽ chỉ hoạt động với IPv4 cho đến khi có IPv6${NC}"
+    fi
+    
+    if [ ! -f "$nginx_config" ]; then
+        echo -e "${RED}❌ Không tìm thấy file cấu hình Nginx: $nginx_config${NC}"
+        return 1
+    fi
+    
+    # Backup config
+    local backup_file="${nginx_config}.backup.$(date +%Y%m%d_%H%M%S)"
+    cp "$nginx_config" "$backup_file"
+    echo -e "${CYAN}📦 Đã backup config: $backup_file${NC}"
+    
+    # Đảm bảo có cả IPv4 và IPv6 listen
+    # Xử lý HTTP (port 80)
+    if ! grep -q "listen 80;" "$nginx_config"; then
+        sed -i '/server {/a\    listen 80;' "$nginx_config"
+        echo -e "${GREEN}✅ Đã thêm listen IPv4 port 80${NC}"
+    fi
+    
+    if ! grep -q "listen \[::\]:80;" "$nginx_config"; then
+        # Thêm sau dòng listen 80;
+        sed -i '/listen 80;/a\    listen [::]:80;' "$nginx_config"
+        echo -e "${GREEN}✅ Đã thêm listen IPv6 port 80${NC}"
+    fi
+    
+    # Xử lý HTTPS (port 443) nếu có SSL
+    if grep -q "listen 443" "$nginx_config"; then
+        if ! grep -q "listen \[::\]:443" "$nginx_config"; then
+            # Thêm IPv6 SSL sau dòng IPv4 SSL
+            if grep -q "listen 443 ssl http2;" "$nginx_config"; then
+                sed -i '/listen 443 ssl http2;/a\    listen [::]:443 ssl http2;' "$nginx_config"
+            elif grep -q "listen 443 ssl;" "$nginx_config"; then
+                sed -i '/listen 443 ssl;/a\    listen [::]:443 ssl;' "$nginx_config"
+            fi
+            echo -e "${GREEN}✅ Đã thêm listen IPv6 port 443 (SSL)${NC}"
+        fi
+    fi
+    
+    # Cấu hình Docker IPv6 (global)
+    if [ -n "$ipv6" ]; then
+        configure_docker_ipv6
+    fi
+    
+    # Test và reload Nginx
+    if nginx -t 2>/dev/null; then
+        systemctl reload nginx
+        echo -e "${GREEN}✅ Đã reload Nginx thành công${NC}"
+        echo -e "\n${GREEN}🎉 Instance $instance_id đã chuyển sang chế độ Dual-stack${NC}"
+        echo -e "${CYAN}📌 Có thể truy cập qua cả IPv4 và IPv6${NC}"
+        log_message "SUCCESS" "Instance $instance_id: Chuyển sang Dual-stack (IPv4 + IPv6)"
+    else
+        echo -e "${RED}❌ Lỗi cấu hình Nginx, đang rollback...${NC}"
+        cp "$backup_file" "$nginx_config"
+        nginx -t && systemctl reload nginx
+        echo -e "${YELLOW}⚠️  Đã rollback về cấu hình cũ${NC}"
+        return 1
+    fi
+}
+
+# Cấu hình Docker hỗ trợ IPv6 (global cho tất cả containers)
+configure_docker_ipv6() {
+    local daemon_json="/etc/docker/daemon.json"
+    
+    echo -e "${CYAN}🐳 Kiểm tra cấu hình Docker IPv6...${NC}"
+    
+    # Kiểm tra đã có IPv6 chưa
+    if grep -q '"ipv6".*true' "$daemon_json" 2>/dev/null; then
+        echo -e "${GREEN}✅ Docker đã được cấu hình IPv6${NC}"
+        return 0
+    fi
+    
+    echo -e "${YELLOW}⚠️  Docker chưa hỗ trợ IPv6, đang cấu hình...${NC}"
+    
+    # Backup daemon.json nếu có
+    if [ -f "$daemon_json" ]; then
+        cp "$daemon_json" "${daemon_json}.backup.$(date +%Y%m%d_%H%M%S)"
+    fi
+    
+    # Tạo hoặc cập nhật daemon.json
+    if [ -f "$daemon_json" ]; then
+        # File đã tồn tại, cần merge
+        if command -v jq >/dev/null 2>&1; then
+            local temp_file=$(mktemp)
+            jq '. + {"ipv6": true, "fixed-cidr-v6": "fd00::/80"}' "$daemon_json" > "$temp_file"
+            mv "$temp_file" "$daemon_json"
+        else
+            # Không có jq, thêm thủ công
+            sed -i 's/}$/,\n  "ipv6": true,\n  "fixed-cidr-v6": "fd00::\/80"\n}/' "$daemon_json"
+        fi
+    else
+        # Tạo file mới
+        cat > "$daemon_json" <<EOF
+{
+  "ipv6": true,
+  "fixed-cidr-v6": "fd00::/80"
+}
+EOF
+    fi
+    
+    echo -e "${GREEN}✅ Đã cấu hình Docker IPv6${NC}"
+    
+    # Restart Docker
+    echo -e "${CYAN}🔄 Đang restart Docker daemon...${NC}"
+    echo -e "${YELLOW}⚠️  Lưu ý: Tất cả containers sẽ bị restart${NC}"
+    read -p "$(echo -e "${CYAN}Tiếp tục? (y/n): ${NC}")" confirm
+    
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        systemctl restart docker
+        echo -e "${GREEN}✅ Đã restart Docker${NC}"
+        
+        # Đợi Docker khởi động
+        sleep 3
+        
+        # Khởi động lại các containers
+        echo -e "${CYAN}🔄 Đang khởi động lại các N8N containers...${NC}"
+        
+        # Tìm và restart tất cả n8n containers
+        for data_dir in /root/n8n_data /root/n8n_data_*; do
+            if [ -d "$data_dir" ] && [ -f "$data_dir/docker-compose.yml" ]; then
+                echo -e "${CYAN}   Khởi động: $data_dir${NC}"
+                docker-compose -f "$data_dir/docker-compose.yml" up -d 2>/dev/null
+            fi
+        done
+        
+        echo -e "${GREEN}✅ Đã khởi động lại các containers${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Bỏ qua restart Docker. Cần restart thủ công để áp dụng IPv6${NC}"
+    fi
 }
 
 handle_update_menu() {
