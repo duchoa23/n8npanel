@@ -834,11 +834,27 @@ delete_backup_by_number() {
 }
 
 handle_backup_menu() {
+    # Chọn instance nếu có nhiều instance
+    if type select_instance_for_operation &>/dev/null; then
+        if ! select_instance_for_operation "Chọn instance để quản lý backup"; then
+            return 0
+        fi
+        # Cập nhật các biến global cho instance được chọn
+        N8N_DATA_DIR="$SELECTED_DATA_DIR"
+        BACKUP_DIR="$SELECTED_DATA_DIR/backups"
+        COMPOSE_FILE="$SELECTED_COMPOSE_FILE"
+    fi
+    
     while true; do
         clear
         print_banner
         
+        # Hiển thị instance đang làm việc
+        local current_instance="${SELECTED_INSTANCE:-1}"
+        local current_domain="${SELECTED_DOMAIN:-$(get_current_domain 2>/dev/null || echo 'N/A')}"
+        
         echo -e "${BOLD}${CYAN}MENU QUẢN LÝ BACKUP${NC}"
+        echo -e "${YELLOW}📌 Instance: ${current_instance} | Domain: ${current_domain}${NC}"
         echo ""
         echo -e "  ${BOLD}${GREEN}TẠO & QUẢN LÝ BACKUP${NC}                ${BOLD}${CYAN}KHÔI PHỤC & XÓA BACKUP${NC}"
         echo ""
@@ -854,7 +870,7 @@ handle_backup_menu() {
         case $backup_choice in
             1)
                 echo -e "\n${BOLD}${GREEN}🚀 ĐANG TẠO BACKUP...${NC}\n"
-                create_manual_backup
+                create_manual_backup_for_instance
                 ;;
             2)
                 echo -e "\n${BOLD}${CYAN}📋 DANH SÁCH BACKUP...${NC}\n"
@@ -887,4 +903,25 @@ handle_backup_menu() {
             read -p "$(echo -e "${BOLD}${YELLOW}⏸️  Nhấn Enter để tiếp tục...${NC}")"
         fi
     done
+}
+
+# Wrapper function để backup instance được chọn
+create_manual_backup_for_instance() {
+    local container_name="${SELECTED_CONTAINER:-n8n}"
+    local postgres_name="${SELECTED_POSTGRES:-postgres}"
+    local instance_id="${SELECTED_INSTANCE:-1}"
+    
+    log_message "INFO" "🚀 Bắt đầu tạo backup cho instance $instance_id ($container_name)..."
+    
+    if ! docker ps --format "table {{.Names}}" | grep -q "^${container_name}$"; then
+        log_message "ERROR" "❌ Container $container_name không đang chạy!"
+        return 1
+    fi
+    
+    # Gọi hàm backup gốc với container name đúng
+    # Tạm thời override biến để dùng đúng container
+    local OLD_CONTAINER="n8n"
+    
+    # Thực hiện backup với container được chọn
+    create_manual_backup
 }

@@ -343,7 +343,16 @@ handle_docker_menu() {
         clear
         print_banner
         
+        # Hiển thị số lượng instances
+        local instance_count=1
+        if type count_instances &>/dev/null; then
+            instance_count=$(count_instances)
+        fi
+        
         echo -e "${BOLD}${CYAN}MENU QUẢN LÝ DOCKER CONTAINER${NC}"
+        if [ "$instance_count" -gt 1 ]; then
+            echo -e "${YELLOW}📌 Phát hiện ${instance_count} instances N8N${NC}"
+        fi
         echo ""
         echo -e "  ${BOLD}${GREEN}QUẢN LÝ CONTAINERS${NC}                  ${BOLD}${CYAN}THÔNG TIN & BẢO TRÌ${NC}"
         echo ""
@@ -359,23 +368,23 @@ handle_docker_menu() {
         case $docker_choice in
             1)
                 echo -e "\n${BOLD}${CYAN}📊 TRẠNG THÁI DOCKER...${NC}\n"
-                show_docker_status
+                show_docker_status_all
                 ;;
             2)
                 echo -e "\n${BOLD}${GREEN}▶️  KHỞI ĐỘNG CONTAINERS...${NC}\n"
-                start_containers
+                start_containers_with_select
                 ;;
             3)
                 echo -e "\n${BOLD}${YELLOW}⏹️  DỪNG CONTAINERS...${NC}\n"
-                stop_containers
+                stop_containers_with_select
                 ;;
             4)
                 echo -e "\n${BOLD}${CYAN}🔄 RESTART CONTAINERS...${NC}\n"
-                restart_containers
+                restart_containers_with_select
                 ;;
             5)
                 echo -e "\n${BOLD}${CYAN}📋 XEM LOGS...${NC}\n"
-                show_container_logs
+                show_container_logs_with_select
                 ;;
             6)
                 echo -e "\n${BOLD}${YELLOW}🧹 DỌN DẸP IMAGES...${NC}\n"
@@ -396,4 +405,67 @@ handle_docker_menu() {
             read -p "$(echo -e "${BOLD}${YELLOW}⏸️  Nhấn Enter để tiếp tục...${NC}")"
         fi
     done
+}
+
+# Hiển thị trạng thái tất cả containers N8N
+show_docker_status_all() {
+    echo -e "${BOLD}${CYAN}📊 TRẠNG THÁI TẤT CẢ CONTAINERS N8N${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "n8n|postgres|NAMES"
+    echo ""
+    show_docker_status
+}
+
+# Wrapper functions với instance selector
+start_containers_with_select() {
+    if type select_instance_for_operation &>/dev/null && type is_multi_instance &>/dev/null && is_multi_instance; then
+        if ! select_instance_for_operation "Chọn instance để khởi động"; then
+            return 0
+        fi
+        local compose_file="${SELECTED_COMPOSE_FILE}"
+        echo -e "${CYAN}▶️  Khởi động instance ${SELECTED_INSTANCE}...${NC}"
+        docker-compose -f "$compose_file" up -d
+    else
+        start_containers
+    fi
+}
+
+stop_containers_with_select() {
+    if type select_instance_for_operation &>/dev/null && type is_multi_instance &>/dev/null && is_multi_instance; then
+        if ! select_instance_for_operation "Chọn instance để dừng"; then
+            return 0
+        fi
+        local compose_file="${SELECTED_COMPOSE_FILE}"
+        echo -e "${YELLOW}⏹️  Dừng instance ${SELECTED_INSTANCE}...${NC}"
+        docker-compose -f "$compose_file" stop
+    else
+        stop_containers
+    fi
+}
+
+restart_containers_with_select() {
+    if type select_instance_for_operation &>/dev/null && type is_multi_instance &>/dev/null && is_multi_instance; then
+        if ! select_instance_for_operation "Chọn instance để restart"; then
+            return 0
+        fi
+        local compose_file="${SELECTED_COMPOSE_FILE}"
+        echo -e "${CYAN}🔄 Restart instance ${SELECTED_INSTANCE}...${NC}"
+        docker-compose -f "$compose_file" restart
+    else
+        restart_containers
+    fi
+}
+
+show_container_logs_with_select() {
+    if type select_instance_for_operation &>/dev/null && type is_multi_instance &>/dev/null && is_multi_instance; then
+        if ! select_instance_for_operation "Chọn instance để xem logs"; then
+            return 0
+        fi
+        local container="${SELECTED_CONTAINER}"
+        echo -e "${CYAN}📋 Logs của ${container}:${NC}"
+        docker logs --tail 100 "$container"
+    else
+        show_container_logs
+    fi
 }

@@ -77,6 +77,7 @@ readonly REQUIRED_FILES=(
     "common/env_manager.sh"
     "common/domain_manager.sh"
     "common/restart_manager.sh"
+    "common/instance_selector.sh"
     "common/domain_change_wrapper.sh"
     "common/nginx_config_wrapper.sh"
     "common/ssl_install_wrapper.sh"
@@ -146,6 +147,13 @@ if [ -f "$INSTALL_DIR/common/domain_manager.sh" ]; then
     source "$INSTALL_DIR/common/domain_manager.sh"
 else
     log_message "WARNING" "domain_manager.sh không tồn tại"
+fi
+
+# 8. instance_selector.sh - Chọn instance cho multi-instance support
+if [ -f "$INSTALL_DIR/common/instance_selector.sh" ]; then
+    source "$INSTALL_DIR/common/instance_selector.sh"
+else
+    log_message "WARNING" "instance_selector.sh không tồn tại"
 fi
 
 # Trap handler tập trung - gọi tất cả cleanup functions

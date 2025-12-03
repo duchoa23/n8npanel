@@ -495,6 +495,52 @@ main_installation() {
     print_banner
     echo ""
     
+    # Kiểm tra xem đã có instance 1 chưa
+    local has_instance_1=false
+    if [ -d "/root/n8n_data" ] && [ -f "/root/n8n_data/docker-compose.yml" ]; then
+        has_instance_1=true
+    fi
+    
+    # Nếu đã có instance 1, hỏi người dùng muốn làm gì
+    if [ "$has_instance_1" = true ]; then
+        echo -e "${YELLOW}╔══════════════════════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${YELLOW}║                         PHÁT HIỆN N8N ĐÃ ĐƯỢC CÀI ĐẶT                                ║${NC}"
+        echo -e "${YELLOW}╚══════════════════════════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "${CYAN}Bạn muốn làm gì?${NC}"
+        echo ""
+        echo -e "  ${BOLD}${GREEN}1.${NC} ${WHITE}Cài đặt lại instance 1 (xóa dữ liệu cũ)${NC}"
+        echo -e "  ${BOLD}${PURPLE}2.${NC} ${WHITE}Tạo thêm instance mới (Multi-Instance)${NC}"
+        echo -e "  ${BOLD}${RED}0.${NC} ${WHITE}Hủy và quay lại${NC}"
+        echo ""
+        
+        read -p "$(echo -e "${BOLD}${CYAN}Chọn tùy chọn [0-2]: ${NC}")" install_choice
+        
+        case $install_choice in
+            1)
+                echo -e "${YELLOW}⚠️  Bạn đã chọn cài đặt lại. Dữ liệu cũ sẽ bị xóa!${NC}"
+                ;;
+            2)
+                echo -e "${GREEN}✅ Chuyển sang tạo instance mới...${NC}"
+                if type handle_multi_instance_menu &>/dev/null; then
+                    # Gọi trực tiếp hàm tạo instance mới
+                    if type create_new_instance &>/dev/null; then
+                        create_new_instance
+                    else
+                        handle_multi_instance_menu
+                    fi
+                else
+                    echo -e "${RED}❌ Module Multi-Instance chưa được load${NC}"
+                fi
+                return 0
+                ;;
+            0|*)
+                echo -e "${YELLOW}📋 Quay lại menu chính...${NC}"
+                return 0
+                ;;
+        esac
+    fi
+    
     IP_DETECT_RESULT=$(auto_detect_ips)
     IP_TYPE=$(echo "$IP_DETECT_RESULT" | tail -1 | cut -d'|' -f1)
     SERVER_IPV4=$(echo "$IP_DETECT_RESULT" | tail -1 | cut -d'|' -f3)

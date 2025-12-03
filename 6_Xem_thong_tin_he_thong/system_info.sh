@@ -173,10 +173,38 @@ show_detailed_info() {
     
     show_system_info
     
+    # Hiển thị thông tin tất cả instances nếu có multi-instance
+    if type get_all_instances &>/dev/null; then
+        local instances=($(get_all_instances))
+        local count=${#instances[@]}
+        
+        if [ $count -gt 1 ]; then
+            echo ""
+            echo -e "${BOLD}${PURPLE}🔢 DANH SÁCH CÁC INSTANCE N8N (${count} instances)${NC}"
+            echo -e "${PURPLE}═══════════════════════════════════════════════════════════════════════════════${NC}"
+            echo ""
+            printf "  ${BOLD}%-4s %-25s %-15s %-8s %-12s${NC}\n" "ID" "Domain" "Status" "Port" "Container"
+            echo "  ────────────────────────────────────────────────────────────────────────"
+            
+            for id in "${instances[@]}"; do
+                local domain=$(get_instance_domain "$id" 2>/dev/null || echo "N/A")
+                local status=$(get_instance_status "$id" 2>/dev/null || echo "Unknown")
+                local port=$(get_instance_port "$id" 2>/dev/null || echo "N/A")
+                local container=$(get_instance_container "$id" 2>/dev/null || echo "n8n")
+                
+                printf "  %-4s %-25s %-15s %-8s %-12s\n" "$id" "$domain" "$status" "$port" "$container"
+            done
+            echo ""
+        fi
+    fi
+    
     echo ""
     echo -e "${CYAN}═══════════════════════════════════════${NC}"
     echo -e "${BOLD}${YELLOW}💡 Gợi ý:${NC}"
     echo -e "${WHITE}   • Sử dụng menu 'Quản lý Docker' để xem chi tiết containers${NC}"
     echo -e "${WHITE}   • Sử dụng menu 'Quản lý Backup' để quản lý backup${NC}"
     echo -e "${WHITE}   • Sử dụng menu 'Quản lý SSL' để kiểm tra SSL${NC}"
+    if type count_instances &>/dev/null && [ $(count_instances) -gt 1 ]; then
+        echo -e "${WHITE}   • Sử dụng menu 'Multi-Instance N8N' để quản lý các instances${NC}"
+    fi
 }

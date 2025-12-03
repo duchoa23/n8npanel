@@ -55,6 +55,7 @@ files=(
     "common/env_manager.sh"
     "common/domain_manager.sh"
     "common/restart_manager.sh"
+    "common/instance_selector.sh"
     "common/domain_change_wrapper.sh"
     "common/nginx_config_wrapper.sh"
     "common/ssl_install_wrapper.sh"

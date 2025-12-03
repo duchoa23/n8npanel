@@ -324,11 +324,28 @@ install_ssl_interactive() {
 }
 
 handle_ssl_menu() {
+    # Chọn instance nếu có nhiều instance
+    if type select_instance_for_operation &>/dev/null; then
+        if ! select_instance_for_operation "Chọn instance để quản lý SSL"; then
+            return 0
+        fi
+        # Cập nhật DOMAIN và EMAIL từ instance được chọn
+        DOMAIN="$SELECTED_DOMAIN"
+        if [ -f "$SELECTED_ENV_FILE" ]; then
+            EMAIL=$(grep "^EMAIL=" "$SELECTED_ENV_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d '"')
+        fi
+    fi
+    
     while true; do
         clear
         print_banner
         
+        # Hiển thị instance đang làm việc
+        local current_instance="${SELECTED_INSTANCE:-1}"
+        local current_domain="${SELECTED_DOMAIN:-$DOMAIN}"
+        
         echo -e "${BOLD}${CYAN}MENU QUẢN LÝ SSL${NC}"
+        echo -e "${YELLOW}📌 Instance: ${current_instance} | Domain: ${current_domain}${NC}"
         echo ""
         echo -e "  ${BOLD}${GREEN}CÀI ĐẶT & CẤU HÌNH SSL${NC}              ${BOLD}${CYAN}BẢO TRÌ & KIỂM TRA${NC}"
         echo ""

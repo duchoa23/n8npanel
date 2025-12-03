@@ -576,7 +576,7 @@ handle_update_menu() {
         echo ""
         echo -e "  ${BOLD}${GREEN}CẬP NHẬT ỨNG DỤNG${NC}                   ${BOLD}${PURPLE}CẤU HÌNH MẠNG${NC}"
         echo ""
-        echo -e "  ${BOLD}${GREEN}1.${NC} ${WHITE}Cập nhật N8N${NC}                       ${BOLD}${PURPLE}3.${NC} ${WHITE}Quản lý cấu hình mạng${NC}"
+        echo -e "  ${BOLD}${GREEN}1.${NC} ${WHITE}Cập nhật N8N (chọn instance)${NC}       ${BOLD}${PURPLE}3.${NC} ${WHITE}Quản lý cấu hình mạng${NC}"
         echo -e "  ${BOLD}${GREEN}2.${NC} ${WHITE}Cập nhật Panel${NC}"
         echo ""
         echo -e "  ${BOLD}${RED}0.${NC} ${WHITE}Quay lại menu chính${NC}"
@@ -586,7 +586,7 @@ handle_update_menu() {
         case $update_choice in
             1)
                 echo -e "\n${BOLD}${GREEN}🔄 CẬP NHẬT N8N...${NC}\n"
-                update_n8n
+                update_n8n_with_instance_select
                 ;;
             2)
                 echo -e "\n${BOLD}${CYAN}🔄 CẬP NHẬT PANEL...${NC}\n"
@@ -611,4 +611,106 @@ handle_update_menu() {
             read -p "$(echo -e "${BOLD}${YELLOW}⏸️  Nhấn Enter để tiếp tục...${NC}")"
         fi
     done
+}
+
+# Wrapper function để update N8N với chọn instance
+update_n8n_with_instance_select() {
+    # Chọn instance nếu có nhiều instance
+    if type select_instance_for_operation &>/dev/null; then
+        if ! select_instance_for_operation "Chọn instance N8N để cập nhật"; then
+            return 0
+        fi
+        # Cập nhật các biến global cho instance được chọn
+        N8N_DATA_DIR="$SELECTED_DATA_DIR"
+        COMPOSE_FILE="$SELECTED_COMPOSE_FILE"
+    fi
+    
+    local container_name="${SELECTED_CONTAINER:-n8n}"
+    local data_dir="${SELECTED_DATA_DIR:-/root/n8n_data}"
+    local compose_file="${SELECTED_COMPOSE_FILE:-$data_dir/docker-compose.yml}"
+    local instance_id="${SELECTED_INSTANCE:-1}"
+    local domain="${SELECTED_DOMAIN:-$(get_current_domain 2>/dev/null)}"
+    
+    echo -e "${BOLD}${CYAN}🔄 ĐANG CẬP NHẬT N8N...${NC}\n"
+    echo -e "${YELLOW}📌 Instance: ${instance_id} | Domain: ${domain} | Container: ${container_name}${NC}"
+    echo ""
+    
+    if ! docker ps | grep -q "$container_name"; then
+        echo -e "${RED}❌ Container $container_name không đang chạy${NC}"
+        echo -e "${YELLOW}💡 Vui lòng khởi động N8N trước khi cập nhật${NC}"
+        return 1
+    fi
+    
+    echo -e "${CYAN}📋 Kiểm tra phiên bản hiện tại...${NC}"
+    local current_version=$(docker exec "$container_name" n8n --version 2>/dev/null || echo "Không xác định")
+    echo -e "${CYAN}   Phiên bản hiện tại: ${current_version}${NC}"
+    
+    echo -e "\n${YELLOW}⚠️  CẢNH BÁO: Quá trình cập nhật sẽ khởi động lại N8N${NC}"
+    echo -e "${YELLOW}   Điều này có thể gián đoạn các workflow đang chạy${NC}"
+    echo -e "\n${CYAN}Bạn có muốn tiếp tục? (y/n): ${NC}"
+    read -p "" update_confirm
+    
+    if [[ ! "$update_confirm" =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}ℹ️  Đã hủy cập nhật N8N${NC}"
+        return 0
+    fi
+    
+    echo -e "\n${CYAN}💾 Tạo backup trước khi cập nhật...${NC}"
+    if type create_manual_backup &>/dev/null; then
+        BACKUP_DIR="$data_dir/backups"
+        mkdir -p "$BACKUP_DIR"
+        create_manual_backup
+    else
+        echo -e "${YELLOW}⚠️  Module backup chưa được load, bỏ qua backup${NC}"
+    fi
+    
+    echo -e "\n${CYAN}🔄 Đang cập nhật N8N...${NC}"
+    echo -e "${CYAN}   📥 Đang tải image N8N mới nhất...${NC}"
+    
+    if docker-compose -f "$compose_file" pull "$container_name" 2>/dev/null || docker-compose -f "$compose_file" pull; then
+        echo -e "${GREEN}   ✅ Đã tải image N8N thành công${NC}"
+    else
+        echo -e "${RED}   ❌ Không thể tải image N8N mới${NC}"
+        return 1
+    fi
+    
+    echo -e "${CYAN}   🔄 Đang khởi động lại N8N với phiên bản mới...${NC}"
+    
+    if docker-compose -f "$compose_file" up -d "$container_name"; then
+        echo -e "${GREEN}   ✅ Đã khởi động lại N8N thành công${NC}"
+    else
+        echo -e "${RED}   ❌ Lỗi khi khởi động lại N8N${NC}"
+        return 1
+    fi
+    
+    echo -e "\n${CYAN}⏳ Đang đợi N8N khởi động hoàn tất...${NC}"
+    local port="${SELECTED_PORT:-5678}"
+    local retry_count=0
+    local max_retries=12
+    
+    while [ $retry_count -lt $max_retries ]; do
+        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${port}" | grep -q "200\|302\|401"; then
+            break
+        fi
+        retry_count=$((retry_count + 1))
+        echo -e "${CYAN}   ⏳ Đang đợi... ($retry_count/$max_retries)${NC}"
+        sleep 5
+    done
+    
+    echo -e "\n${CYAN}📋 Kiểm tra phiên bản sau cập nhật...${NC}"
+    sleep 3
+    local new_version=$(docker exec "$container_name" n8n --version 2>/dev/null || echo "Không xác định")
+    echo -e "${GREEN}   Phiên bản mới: ${new_version}${NC}"
+    
+    echo -e "\n${GREEN}╔══════════════════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║                              ✅ CẬP NHẬT N8N HOÀN TẤT! ✅                              ║${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════════════════════════╝${NC}"
+    
+    echo -e "\n${CYAN}📋 Tóm tắt cập nhật:${NC}"
+    echo -e "${CYAN}   • Instance: ${instance_id}${NC}"
+    echo -e "${CYAN}   • Domain: ${domain}${NC}"
+    echo -e "${CYAN}   • Phiên bản cũ: ${current_version}${NC}"
+    echo -e "${GREEN}   • Phiên bản mới: ${new_version}${NC}"
+    
+    log_message "SUCCESS" "Cập nhật N8N instance $instance_id thành công từ $current_version lên $new_version"
 }

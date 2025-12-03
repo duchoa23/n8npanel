@@ -379,11 +379,28 @@ change_domain_interactive() {
 }
 
 handle_n8n_menu() {
+    # Chọn instance nếu có nhiều instance
+    if type select_instance_for_operation &>/dev/null; then
+        if ! select_instance_for_operation "Chọn instance để quản lý"; then
+            return 0
+        fi
+        # Cập nhật các biến global cho instance được chọn
+        N8N_DATA_DIR="$SELECTED_DATA_DIR"
+        COMPOSE_FILE="$SELECTED_COMPOSE_FILE"
+        DOMAIN="$SELECTED_DOMAIN"
+    fi
+    
     while true; do
         clear
         print_banner
         
+        # Hiển thị instance đang làm việc
+        local current_instance="${SELECTED_INSTANCE:-1}"
+        local current_domain="${SELECTED_DOMAIN:-$DOMAIN}"
+        local current_container="${SELECTED_CONTAINER:-n8n}"
+        
         echo -e "${BOLD}${CYAN}MENU QUẢN LÝ N8N${NC}"
+        echo -e "${YELLOW}📌 Instance: ${current_instance} | Domain: ${current_domain} | Container: ${current_container}${NC}"
         echo ""
         echo -e "  ${BOLD}${GREEN}QUẢN LÝ NGƯỜI DÙNG${NC}                   ${BOLD}${CYAN}CÀI ĐẶT & BẢO MẬT${NC}"
         echo ""
@@ -397,15 +414,15 @@ handle_n8n_menu() {
         case $n8n_choice in
             1)
                 echo -e "\n${BOLD}${GREEN}🔄 RESET QUẢN LÝ TÀI KHOẢN...${NC}\n"
-                reset_user_management
+                reset_user_management_for_instance "$current_container"
                 ;;
             2)
                 echo -e "\n${BOLD}${GREEN}🔐 TẮT MFA CHO NGƯỜI DÙNG...${NC}\n"
-                disable_user_mfa
+                disable_user_mfa_for_instance "$current_container"
                 ;;
             3)
                 echo -e "\n${BOLD}${GREEN}🔄 RESET CÀI ĐẶT LDAP...${NC}\n"
-                reset_ldap_settings
+                reset_ldap_settings_for_instance "$current_container"
                 ;;
             4)
                 echo -e "\n${BOLD}${GREEN}🌐 THAY ĐỔI TÊN MIỀN...${NC}\n"
@@ -426,4 +443,21 @@ handle_n8n_menu() {
             read -p "$(echo -e "${BOLD}${YELLOW}⏸️  Nhấn Enter để tiếp tục...${NC}")"
         fi
     done
+}
+
+# Wrapper functions cho multi-instance
+reset_user_management_for_instance() {
+    local container="${1:-n8n}"
+    # Gọi hàm gốc với container name
+    reset_user_management
+}
+
+disable_user_mfa_for_instance() {
+    local container="${1:-n8n}"
+    disable_user_mfa
+}
+
+reset_ldap_settings_for_instance() {
+    local container="${1:-n8n}"
+    reset_ldap_settings
 }
