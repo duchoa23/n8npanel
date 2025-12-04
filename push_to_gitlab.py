@@ -3,25 +3,34 @@
 Script đẩy code lên GitLab
 GitLab: https://gitlabs.inet.vn/donv/onescript
 Branch: v3
+
+Yêu cầu nhập Access Token mỗi lần push (không lưu)
 """
 
 import subprocess
 import os
 import sys
+import getpass
 
 # Cấu hình
-GITLAB_URL = "https://gitlabs.inet.vn/donv/onescript.git"
+GITLAB_HOST = "gitlabs.inet.vn"
+GITLAB_PROJECT = "donv/onescript"
 BRANCH = "v3"
 REMOTE_NAME = "origin"
+USERNAME = "donv"  # Username GitLab của bạn
 
-def run_cmd(cmd, check=True):
+def run_cmd(cmd, check=True, capture=True):
     """Chạy command và trả về output"""
     print(f"  → {cmd}")
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    if check and result.returncode != 0:
-        print(f"  ❌ Lỗi: {result.stderr}")
-        return None
-    return result.stdout.strip()
+    if capture:
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if check and result.returncode != 0:
+            print(f"  ❌ Lỗi: {result.stderr}")
+            return None
+        return result.stdout.strip()
+    else:
+        result = subprocess.run(cmd, shell=True)
+        return result.returncode == 0
 
 def check_git():
     """Kiểm tra git đã cài đặt chưa"""
@@ -42,23 +51,30 @@ def init_repo():
     else:
         print("✅ Git repo đã tồn tại")
 
-def setup_remote():
-    """Cấu hình remote GitLab"""
+def setup_remote_with_token(token):
+    """Cấu hình remote GitLab với token trong URL"""
     print("\n🔗 Cấu hình remote...")
+    
+    # URL với token embedded (không lưu vào credential store)
+    remote_url = f"https://{USERNAME}:{token}@{GITLAB_HOST}/{GITLAB_PROJECT}.git"
     
     # Kiểm tra remote đã tồn tại chưa
     remotes = run_cmd("git remote -v", check=False) or ""
     
     if REMOTE_NAME in remotes:
-        # Cập nhật URL nếu khác
-        if GITLAB_URL not in remotes:
-            run_cmd(f"git remote set-url {REMOTE_NAME} {GITLAB_URL}")
-            print(f"✅ Đã cập nhật remote URL: {GITLAB_URL}")
-        else:
-            print(f"✅ Remote đã được cấu hình: {GITLAB_URL}")
+        # Cập nhật URL với token mới
+        run_cmd(f"git remote set-url {REMOTE_NAME} {remote_url}")
+        print(f"✅ Đã cập nhật remote với token")
     else:
-        run_cmd(f"git remote add {REMOTE_NAME} {GITLAB_URL}")
-        print(f"✅ Đã thêm remote: {GITLAB_URL}")
+        run_cmd(f"git remote add {REMOTE_NAME} {remote_url}")
+        print(f"✅ Đã thêm remote với token")
+
+def remove_token_from_remote():
+    """Xóa token khỏi remote URL sau khi push"""
+    print("\n🔒 Xóa token khỏi remote URL...")
+    clean_url = f"https://{GITLAB_HOST}/{GITLAB_PROJECT}.git"
+    run_cmd(f"git remote set-url {REMOTE_NAME} {clean_url}")
+    print("✅ Đã xóa token khỏi cấu hình")
 
 def create_gitignore():
     """Tạo .gitignore nếu chưa có"""
@@ -107,11 +123,11 @@ def add_and_commit(message=None):
     
     # Hiển thị files sẽ commit
     print("\n📋 Files sẽ được commit:")
-    for line in status.split("\n")[:20]:  # Giới hạn 20 dòng
-        if line:
-            print(f"   {line}")
-    if len(status.split("\n")) > 20:
-        print(f"   ... và {len(status.split(chr(10))) - 20} files khác")
+    lines = [l for l in status.split("\n") if l]
+    for line in lines[:20]:
+        print(f"   {line}")
+    if len(lines) > 20:
+        print(f"   ... và {len(lines) - 20} files khác")
     
     # Lấy commit message
     if not message:
@@ -140,40 +156,26 @@ def push_to_gitlab():
             print(f"✅ Đã chuyển sang branch: {BRANCH}")
     
     # Push
-    print("\n⏳ Đang push... (có thể cần nhập username/password)")
-    result = subprocess.run(
-        f"git push -u {REMOTE_NAME} {BRANCH}",
-        shell=True,
-        capture_output=False  # Hiển thị prompt nhập password
-    )
+    print("\n⏳ Đang push...")
+    result = run_cmd(f"git push -u {REMOTE_NAME} {BRANCH}", check=False)
     
-    if result.returncode == 0:
+    if result is not None:
         print(f"\n✅ Push thành công!")
-        print(f"🔗 URL: https://gitlabs.inet.vn/donv/onescript/-/tree/{BRANCH}")
+        print(f"🔗 URL: https://{GITLAB_HOST}/{GITLAB_PROJECT}/-/tree/{BRANCH}")
         return True
     else:
         print("\n❌ Push thất bại!")
         print("\n💡 Gợi ý:")
-        print("   1. Kiểm tra username/password GitLab")
-        print("   2. Tạo Personal Access Token: Settings → Access Tokens")
-        print("   3. Dùng token thay password khi push")
-        print(f"\n   Hoặc cấu hình credential:")
-        print(f"   git config credential.helper store")
+        print("   1. Kiểm tra Access Token có đúng không")
+        print("   2. Token cần có scope: write_repository")
+        print(f"   3. Tạo token tại: https://{GITLAB_HOST}/-/profile/personal_access_tokens")
         return False
-
-def setup_credential_helper():
-    """Cấu hình lưu credential"""
-    print("\n🔐 Cấu hình credential helper...")
-    choice = input("Lưu credential để không phải nhập lại? (y/n): ").strip().lower()
-    if choice == 'y':
-        run_cmd("git config credential.helper store")
-        print("✅ Credential sẽ được lưu sau lần đăng nhập đầu tiên")
 
 def main():
     print("=" * 60)
     print("   PUSH TO GITLAB - N8N Panel v3")
     print("=" * 60)
-    print(f"\n📍 GitLab: {GITLAB_URL}")
+    print(f"\n📍 GitLab: https://{GITLAB_HOST}/{GITLAB_PROJECT}")
     print(f"📍 Branch: {BRANCH}")
     print(f"📍 Thư mục: {os.getcwd()}")
     
@@ -188,33 +190,62 @@ def main():
     # Tạo .gitignore
     create_gitignore()
     
-    # Cấu hình remote
-    setup_remote()
+    # Yêu cầu nhập Access Token
+    print("\n" + "=" * 60)
+    print("🔐 NHẬP GITLAB ACCESS TOKEN")
+    print("=" * 60)
+    print(f"💡 Tạo token tại: https://{GITLAB_HOST}/-/profile/personal_access_tokens")
+    print("💡 Token cần scope: write_repository (hoặc api)")
+    print("💡 Token sẽ KHÔNG được lưu lại\n")
     
-    # Hỏi có muốn cấu hình credential không
-    setup_credential_helper()
+    token = getpass.getpass("🔑 Nhập Access Token: ")
     
-    # Add và commit
-    commit_msg = None
-    if len(sys.argv) > 1:
-        commit_msg = " ".join(sys.argv[1:])
+    if not token:
+        print("❌ Token không được để trống!")
+        return 1
     
-    add_and_commit(commit_msg)
+    # Cấu hình remote với token
+    setup_remote_with_token(token)
     
-    # Push
-    push_to_gitlab()
+    try:
+        # Add và commit
+        commit_msg = None
+        if len(sys.argv) > 1:
+            commit_msg = " ".join(sys.argv[1:])
+        
+        add_and_commit(commit_msg)
+        
+        # Push
+        success = push_to_gitlab()
+        
+    finally:
+        # Luôn xóa token khỏi remote URL sau khi push
+        remove_token_from_remote()
     
     print("\n" + "=" * 60)
-    print("   HOÀN TẤT!")
+    if success:
+        print("   ✅ HOÀN TẤT!")
+    else:
+        print("   ❌ CÓ LỖI XẢY RA")
     print("=" * 60)
-    return 0
+    return 0 if success else 1
 
 if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
         print("\n\n⚠️  Đã hủy bởi người dùng")
+        # Xóa token nếu đã set
+        try:
+            remove_token_from_remote()
+        except:
+            pass
         sys.exit(1)
     except Exception as e:
         print(f"\n❌ Lỗi: {e}")
+        # Xóa token nếu đã set
+        try:
+            remove_token_from_remote()
+        except:
+            pass
         sys.exit(1)
