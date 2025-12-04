@@ -140,28 +140,29 @@ def add_and_commit(message=None):
     print(f"✅ Đã commit: {message}")
     return True
 
-def push_to_gitlab():
+def push_to_gitlab(branch=None):
     """Push lên GitLab"""
-    print(f"\n🚀 Đang push lên GitLab branch '{BRANCH}'...")
+    target_branch = branch or BRANCH
+    print(f"\n🚀 Đang push lên GitLab branch '{target_branch}'...")
     
     # Checkout hoặc tạo branch
     branches = run_cmd("git branch", check=False) or ""
-    if BRANCH not in branches:
-        run_cmd(f"git checkout -b {BRANCH}")
-        print(f"✅ Đã tạo branch: {BRANCH}")
+    if target_branch not in branches:
+        run_cmd(f"git checkout -b {target_branch}")
+        print(f"✅ Đã tạo branch: {target_branch}")
     else:
         current = run_cmd("git branch --show-current", check=False) or ""
-        if current != BRANCH:
-            run_cmd(f"git checkout {BRANCH}")
-            print(f"✅ Đã chuyển sang branch: {BRANCH}")
+        if current != target_branch:
+            run_cmd(f"git checkout {target_branch}")
+            print(f"✅ Đã chuyển sang branch: {target_branch}")
     
     # Push
     print("\n⏳ Đang push...")
-    result = run_cmd(f"git push -u {REMOTE_NAME} {BRANCH}", check=False)
+    result = run_cmd(f"git push -u {REMOTE_NAME} {target_branch}", check=False)
     
     if result is not None:
         print(f"\n✅ Push thành công!")
-        print(f"🔗 URL: https://{GITLAB_HOST}/{GITLAB_PROJECT}/-/tree/{BRANCH}")
+        print(f"🔗 URL: https://{GITLAB_HOST}/{GITLAB_PROJECT}/-/tree/{target_branch}")
         return True
     else:
         print("\n❌ Push thất bại!")
@@ -171,13 +172,128 @@ def push_to_gitlab():
         print(f"   3. Tạo token tại: https://{GITLAB_HOST}/-/profile/personal_access_tokens")
         return False
 
+def list_remote_branches():
+    """Liệt kê các branch trên remote"""
+    print("\n📋 Đang lấy danh sách branches từ remote...")
+    run_cmd(f"git fetch {REMOTE_NAME}", check=False)
+    branches = run_cmd(f"git branch -r", check=False) or ""
+    
+    branch_list = []
+    for line in branches.split("\n"):
+        line = line.strip()
+        if line and "->" not in line:  # Bỏ qua HEAD pointer
+            # Loại bỏ prefix "origin/"
+            branch_name = line.replace(f"{REMOTE_NAME}/", "")
+            branch_list.append(branch_name)
+    
+    return branch_list
+
+def delete_remote_branch(branch_name):
+    """Xóa branch trên remote"""
+    print(f"\n🗑️  Đang xóa branch '{branch_name}' trên remote...")
+    
+    # Xóa trên remote
+    result = run_cmd(f"git push {REMOTE_NAME} --delete {branch_name}", check=False)
+    
+    if result is not None:
+        print(f"✅ Đã xóa branch '{branch_name}' trên remote")
+        
+        # Xóa local branch nếu có
+        local_branches = run_cmd("git branch", check=False) or ""
+        if branch_name in local_branches:
+            current = run_cmd("git branch --show-current", check=False) or ""
+            if current == branch_name:
+                # Chuyển sang branch khác trước khi xóa
+                run_cmd(f"git checkout main", check=False) or run_cmd(f"git checkout master", check=False)
+            run_cmd(f"git branch -D {branch_name}", check=False)
+            print(f"✅ Đã xóa branch '{branch_name}' local")
+        
+        return True
+    else:
+        print(f"❌ Không thể xóa branch '{branch_name}'")
+        return False
+
+def manage_branches():
+    """Menu quản lý branches"""
+    branches = list_remote_branches()
+    
+    if not branches:
+        print("ℹ️  Không có branch nào trên remote")
+        return
+    
+    print("\n" + "=" * 50)
+    print("   DANH SÁCH BRANCHES TRÊN REMOTE")
+    print("=" * 50)
+    
+    for i, branch in enumerate(branches, 1):
+        protected = " ⚠️ (protected)" if branch in ["main", "master"] else ""
+        print(f"   {i}. {branch}{protected}")
+    
+    print(f"\n   0. Quay lại")
+    print("=" * 50)
+    
+    choice = input("\n🗑️  Nhập số thứ tự branch cần XÓA (0 để quay lại): ").strip()
+    
+    if choice == "0" or not choice:
+        return
+    
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(branches):
+            branch_to_delete = branches[idx]
+            
+            # Cảnh báo nếu là branch protected
+            if branch_to_delete in ["main", "master"]:
+                print(f"\n⚠️  CẢNH BÁO: '{branch_to_delete}' thường là branch chính!")
+            
+            confirm = input(f"\n⚠️  Xác nhận XÓA branch '{branch_to_delete}'? (yes/no): ").strip().lower()
+            
+            if confirm == "yes":
+                delete_remote_branch(branch_to_delete)
+            else:
+                print("ℹ️  Đã hủy xóa branch")
+        else:
+            print("❌ Số không hợp lệ")
+    except ValueError:
+        print("❌ Vui lòng nhập số")
+
+def show_menu():
+    """Hiển thị menu chính"""
+    print("\n" + "=" * 50)
+    print("   GITLAB MANAGER - N8N Panel")
+    print("=" * 50)
+    print(f"\n📍 GitLab: https://{GITLAB_HOST}/{GITLAB_PROJECT}")
+    print(f"📍 Thư mục: {os.getcwd()}")
+    print("\n" + "-" * 50)
+    print("   1. 🚀 Push code lên GitLab")
+    print("   2. 🗑️  Xóa branch trên remote")
+    print("   3. 📋 Xem danh sách branches")
+    print("   0. ❌ Thoát")
+    print("-" * 50)
+    
+    return input("\nChọn chức năng [0-3]: ").strip()
+
+def do_push(token):
+    """Thực hiện push"""
+    # Hỏi branch
+    target_branch = input(f"\n📌 Nhập tên branch (Enter = '{BRANCH}'): ").strip()
+    if not target_branch:
+        target_branch = BRANCH
+    
+    # Add và commit
+    commit_msg = input("\n💬 Nhập commit message (Enter = mặc định): ").strip()
+    if not commit_msg:
+        commit_msg = "Update N8N Panel v3.1"
+    
+    add_and_commit(commit_msg)
+    
+    # Push
+    return push_to_gitlab(target_branch)
+
 def main():
     print("=" * 60)
-    print("   PUSH TO GITLAB - N8N Panel v3")
+    print("   GITLAB MANAGER - N8N Panel v3")
     print("=" * 60)
-    print(f"\n📍 GitLab: https://{GITLAB_HOST}/{GITLAB_PROJECT}")
-    print(f"📍 Branch: {BRANCH}")
-    print(f"📍 Thư mục: {os.getcwd()}")
     
     # Kiểm tra git
     print("\n🔍 Kiểm tra Git...")
@@ -195,7 +311,7 @@ def main():
     print("🔐 NHẬP GITLAB ACCESS TOKEN")
     print("=" * 60)
     print(f"💡 Tạo token tại: https://{GITLAB_HOST}/-/profile/personal_access_tokens")
-    print("💡 Token cần scope: write_repository (hoặc api)")
+    print("💡 Token cần scope: write_repository hoặc api")
     print("💡 Token sẽ KHÔNG được lưu lại\n")
     
     token = getpass.getpass("🔑 Nhập Access Token: ")
@@ -207,28 +323,37 @@ def main():
     # Cấu hình remote với token
     setup_remote_with_token(token)
     
+    success = True
     try:
-        # Add và commit
-        commit_msg = None
-        if len(sys.argv) > 1:
-            commit_msg = " ".join(sys.argv[1:])
-        
-        add_and_commit(commit_msg)
-        
-        # Push
-        success = push_to_gitlab()
+        while True:
+            choice = show_menu()
+            
+            if choice == "1":
+                success = do_push(token)
+            elif choice == "2":
+                manage_branches()
+            elif choice == "3":
+                branches = list_remote_branches()
+                if branches:
+                    print("\n📋 Branches trên remote:")
+                    for b in branches:
+                        print(f"   • {b}")
+                else:
+                    print("ℹ️  Không có branch nào")
+                input("\nNhấn Enter để tiếp tục...")
+            elif choice == "0":
+                break
+            else:
+                print("❌ Lựa chọn không hợp lệ")
         
     finally:
-        # Luôn xóa token khỏi remote URL sau khi push
+        # Luôn xóa token khỏi remote URL
         remove_token_from_remote()
     
     print("\n" + "=" * 60)
-    if success:
-        print("   ✅ HOÀN TẤT!")
-    else:
-        print("   ❌ CÓ LỖI XẢY RA")
+    print("   👋 TẠM BIỆT!")
     print("=" * 60)
-    return 0 if success else 1
+    return 0
 
 if __name__ == "__main__":
     try:
