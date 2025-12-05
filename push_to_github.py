@@ -54,6 +54,22 @@ def main():
     if not branch:
         branch = "main"
     
+    # Hỏi có muốn xóa trắng history không
+    print()
+    print("⚠️  TÙY CHỌN XÓA TRẮNG HISTORY:")
+    print("   1. Push bình thường (giữ history)")
+    print("   2. Xóa trắng history, push mới hoàn toàn")
+    clean_choice = input("👉 Chọn (1/2, Enter = 1): ").strip()
+    clean_history = clean_choice == "2"
+    
+    if clean_history:
+        print()
+        print("🔴 CẢNH BÁO: Sẽ xóa TOÀN BỘ lịch sử commit trên GitHub!")
+        confirm = input("   Nhập 'XOA' để xác nhận: ").strip()
+        if confirm != "XOA":
+            print("❌ Đã hủy thao tác xóa trắng.")
+            clean_history = False
+    
     print()
     print("=" * 60)
     print("🚀 Bắt đầu đẩy lên GitHub...")
@@ -68,7 +84,16 @@ def main():
     
     # Kiểm tra đã có .git chưa
     git_dir = os.path.join(current_dir, ".git")
-    if not os.path.exists(git_dir):
+    
+    if clean_history:
+        # Xóa trắng: xóa .git cũ và tạo mới
+        print("🗑️  Xóa history cũ...")
+        if os.path.exists(git_dir):
+            import shutil
+            shutil.rmtree(git_dir)
+        print("📦 Khởi tạo git repository mới...")
+        run_cmd("git init", cwd=current_dir)
+    elif not os.path.exists(git_dir):
         print("📦 Khởi tạo git repository...")
         run_cmd("git init", cwd=current_dir)
     
@@ -125,7 +150,15 @@ n8n2_nginx.txt
     
     # Push
     print(f"🚀 Đẩy lên GitHub ({branch})...")
-    success, output = run_cmd(f"git push -u origin {branch} --force", cwd=current_dir)
+    if clean_history:
+        # Force push để ghi đè hoàn toàn
+        success, output = run_cmd(f"git push -u origin {branch} --force", cwd=current_dir)
+    else:
+        success, output = run_cmd(f"git push -u origin {branch}", cwd=current_dir)
+        if not success:
+            # Thử force push nếu push thường thất bại
+            print("⚠️  Push thường thất bại, thử force push...")
+            success, output = run_cmd(f"git push -u origin {branch} --force", cwd=current_dir)
     
     print()
     print("=" * 60)
