@@ -12,7 +12,7 @@ readonly NC='\033[0m'
 readonly BOLD='\033[1m'
 
 INSTALL_DIR="/opt/n8npanel/v3"
-MANIFEST_URL="https://drive.inet.vn/uploads/v3/manifest.json"
+MANIFEST_URL="https://duchoa.biz/test/manifest.json"
 
 echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BOLD}${CYAN}║         N8N PANEL V3 - INSTALLATION SCRIPT                   ║${NC}"
@@ -96,7 +96,7 @@ for file in "${files[@]}"; do
     # Retry 3 lần
     success=false
     for attempt in {1..3}; do
-        if curl -s --connect-timeout 30 "https://drive.inet.vn/uploads/v3/$file" -o "$dest_path" 2>/dev/null; then
+        if curl -s --connect-timeout 30 "https://duchoa.biz/test/$file" -o "$dest_path" 2>/dev/null; then
             # Kiểm tra file có hợp lệ không (không phải HTML)
             if head -n 1 "$dest_path" 2>/dev/null | grep -q "^#!" || [[ "$file" == *.json ]] || [[ "$file" == *.txt ]] || [[ "$file" == *.py ]]; then
                 chmod +x "$dest_path" 2>/dev/null
@@ -116,7 +116,7 @@ for file in "${files[@]}"; do
     
     if [ "$success" = false ]; then
         echo -e "${RED}     ❌ THẤT BẠI sau 3 lần thử: $file${NC}"
-        echo -e "${RED}     💡 Kiểm tra URL: https://drive.inet.vn/uploads/v3/$file${NC}"
+        echo -e "${RED}     💡 Kiểm tra URL: https://duchoa.biz/test/$file${NC}"
     fi
 done
 

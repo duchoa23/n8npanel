@@ -407,9 +407,13 @@ handle_n8n_menu() {
         echo -e "  ${BOLD}${GREEN}1.${NC} ${WHITE}Reset quản lý tài khoản${NC}           ${BOLD}${CYAN}3.${NC} ${WHITE}Reset cài đặt LDAP${NC}"
         echo -e "  ${BOLD}${GREEN}2.${NC} ${WHITE}Tắt MFA cho người dùng${NC}            ${BOLD}${CYAN}4.${NC} ${WHITE}Thay đổi tên miền${NC}"
         echo ""
+        echo -e "  ${BOLD}${PURPLE}KHẮC PHỤC SỰ CỐ${NC}"
+        echo ""
+        echo -e "  ${BOLD}${PURPLE}5.${NC} ${WHITE}Fix Nginx về cấu hình gốc${NC}"
+        echo ""
         echo -e "  ${BOLD}${RED}0.${NC} ${WHITE}Quay lại menu chính${NC}"
         
-        read -p "$(echo -e "${BOLD}${CYAN}Chọn tùy chọn [0-4]: ${NC}")" n8n_choice
+        read -p "$(echo -e "${BOLD}${CYAN}Chọn tùy chọn [0-5]: ${NC}")" n8n_choice
         
         case $n8n_choice in
             1)
@@ -428,11 +432,15 @@ handle_n8n_menu() {
                 echo -e "\n${BOLD}${GREEN}🌐 THAY ĐỔI TÊN MIỀN...${NC}\n"
                 change_domain_interactive
                 ;;
+            5)
+                echo -e "\n${BOLD}${PURPLE}🔧 FIX NGINX VỀ CẤU HÌNH GỐC...${NC}\n"
+                fix_nginx_to_default
+                ;;
             0)
                 break
                 ;;
             *)
-                echo -e "\n${BOLD}${RED}❌ Tùy chọn không hợp lệ! Vui lòng chọn từ 0-4.${NC}"
+                echo -e "\n${BOLD}${RED}❌ Tùy chọn không hợp lệ! Vui lòng chọn từ 0-5.${NC}"
                 sleep 2
                 ;;
         esac
@@ -460,4 +468,81 @@ disable_user_mfa_for_instance() {
 reset_ldap_settings_for_instance() {
     local container="${1:-n8n}"
     reset_ldap_settings
+}
+
+# Fix Nginx về cấu hình gốc
+# Tận dụng apply_nginx_config từ nginx_manager.sh
+# Hỗ trợ multi-instance qua SELECTED_DATA_DIR
+fix_nginx_to_default() {
+    log_message "INFO" "🔧 Bắt đầu fix Nginx về cấu hình gốc..."
+    
+    # Kiểm tra module nginx_manager đã được load chưa
+    if ! type apply_nginx_config &>/dev/null; then
+        log_message "ERROR" "Module nginx_manager chưa được load"
+        echo -e "${RED}❌ Module nginx_manager chưa được load${NC}"
+        return 1
+    fi
+    
+    # Hỗ trợ multi-instance: ưu tiên SELECTED_DATA_DIR
+    local data_dir="${SELECTED_DATA_DIR:-$N8N_DATA_DIR}"
+    local env_file="$data_dir/.env"
+    
+    # Đọc domain từ .env hoặc container
+    local current_domain=""
+    if [ -f "$env_file" ]; then
+        current_domain=$(grep "^DOMAIN=" "$env_file" | head -1 | cut -d'=' -f2 | tr -d '"' | tr -d ' ' | tr -d '\r\n')
+    elif type get_current_domain &>/dev/null; then
+        current_domain=$(get_current_domain)
+    fi
+    
+    if [ -z "$current_domain" ] || [ "$current_domain" = "localhost" ]; then
+        echo -e "${RED}❌ Không tìm thấy domain hợp lệ trong .env${NC}"
+        echo -e "${YELLOW}💡 Vui lòng thiết lập domain trước bằng menu 'Thay đổi tên miền'${NC}"
+        return 1
+    fi
+    
+    # Kiểm tra SSL
+    local has_ssl="false"
+    if type check_ssl_exists &>/dev/null && check_ssl_exists "$current_domain"; then
+        has_ssl="true"
+    elif [ -f "/etc/letsencrypt/live/${current_domain}/fullchain.pem" ]; then
+        has_ssl="true"
+    fi
+    
+    echo -e "${BOLD}${CYAN}"
+    echo "╔══════════════════════════════════════════════════════════════════════════════╗"
+    echo "║                        🔧 FIX NGINX VỀ CẤU HÌNH GỐC                          ║"
+    echo "╚══════════════════════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    echo -e "${YELLOW}📋 Domain: ${WHITE}${current_domain}${NC}"
+    echo -e "${YELLOW}📋 SSL: ${WHITE}$([ "$has_ssl" = "true" ] && echo "✅ Có" || echo "❌ Không")${NC}"
+    echo ""
+    
+    # Xác nhận
+    read -p "$(echo -e "${BOLD}${YELLOW}Xác nhận fix Nginx? [Y/n]: ${NC}")" confirm
+    if [[ "$confirm" =~ ^[Nn]$ ]]; then
+        echo -e "${YELLOW}❌ Đã hủy${NC}"
+        return 0
+    fi
+    
+    echo -e "\n${CYAN}🔄 Đang fix Nginx...${NC}"
+    
+    # Gọi apply_nginx_config từ nginx_manager.sh
+    # Tham số 2: force_http - nếu không có SSL thì dùng HTTP only
+    local force_http="true"
+    [ "$has_ssl" = "true" ] && force_http="false"
+    
+    if apply_nginx_config "$current_domain" "$force_http"; then
+        echo ""
+        echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${GREEN}║                     ✅ FIX NGINX THÀNH CÔNG                                  ║${NC}"
+        echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "${WHITE}• URL: ${GREEN}$([ "$has_ssl" = "true" ] && echo "https" || echo "http")://$current_domain${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ Không thể fix Nginx${NC}"
+        return 1
+    fi
 }
